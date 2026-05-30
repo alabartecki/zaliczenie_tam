@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/artwork.dart';
 import '../services/artwork_api_service.dart';
 import '../services/artwork_local_database.dart';
@@ -10,10 +11,14 @@ void main() async {
 
   await Hive.openBox("artworks_cache");
   await Hive.openBox("favorites");
+  await Hive.openBox("descriptions_cache");
 
   runApp(const MaterialApp(home: ListScreen()));
 }
 
+// ==========================================
+// EKRAN 1: LISTA ELEMENTÓW
+// ==========================================
 class ListScreen extends StatefulWidget {
   const ListScreen({super.key});
   @override
@@ -32,6 +37,7 @@ class _ListScreenState extends State<ListScreen> {
   }
 
   Future<void> _fetch() async {
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -52,11 +58,11 @@ class _ListScreenState extends State<ListScreen> {
           _artworks = ArtworkLocalDatabase.getCachedArtworks();
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Brak sieci. Załadowano cache offline.")),
+          const SnackBar(content: Text("No network. Offline cache loaded.")),
         );
       } else {
         setState(() {
-          _error = "Błąd pobierania danych. Brak połączenia i pamięci podręcznej.";
+          _error = "Error downloading data. No connection and cache.";
         });
       }
     } finally {
@@ -67,7 +73,7 @@ class _ListScreenState extends State<ListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Muzeum")),
+      appBar: AppBar(title: const Text("Metropolitan Museum of Art")),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -76,31 +82,46 @@ class _ListScreenState extends State<ListScreen> {
         itemCount: _artworks.length,
         itemBuilder: (context, i) {
           final item = _artworks[i];
+
           return ListTile(
+            leading: SizedBox(
+              width: 50,
+              height: 50,
+              child: item.imageUrl.isNotEmpty
+                  ? CachedNetworkImage(
+                imageUrl: item.imageUrl,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 2),
+                errorWidget: (context, url, error) => const Icon(Icons.broken_image),
+              )
+                  : const Icon(Icons.image_not_supported),
+            ),
             title: Text(item.title),
             subtitle: Text(item.artistDisplay),
-            trailing: const Icon(Icons.arrow_forward),
             onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (c) => DetailScreen(id: item.id, title: item.title),
+              builder: (c) => DetailScreen(artwork: item),
             )),
           );
         },
       ),
     );
   }
+
 }
 
+
+// ==========================================
+// EKRAN 2: SZCZEGÓŁY ELEMENTU
+// ==========================================
 class DetailScreen extends StatefulWidget {
-  final int id;
-  final String title;
-  const DetailScreen({super.key, required this.id, required this.title});
+  final Artwork artwork;
+  const DetailScreen({super.key, required this.artwork});
   @override
   State<DetailScreen> createState() => _DetailScreenState();
 }
 
 class _DetailScreenState extends State<DetailScreen> {
-  String _desc = "Ładowanie opisu...";
-  bool _isDetailLoading = true;
+  String _desc = "Loading details...";
 
   @override
   void initState() {
@@ -109,30 +130,47 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _fetchDetail() async {
+    final box = Hive.box("descriptions_cache");
     try {
-      final String description = await ArtworkApiService.fetchArtworkDescription(widget.id);
-      setState(() {
-        _desc = description;
-      });
+      final String description = await ArtworkApiService.fetchArtworkDescription(widget.artwork.id);
+
+      setState(() { _desc = description; });
+
+      await box.put(widget.artwork.id, description);
+
     } catch (e) {
+      final String? cachedDesc = box.get(widget.artwork.id);
       setState(() {
-        _desc = "Opis niedostępny w trybie offline.";
+        if (cachedDesc != null) {
+          _desc = "$cachedDesc\n\n(Data loaded from device cache)";
+        } else {
+          _desc = "Detailed information is not available offline for this object (has not been previously displayed).";
+        }
       });
-    } finally {
-      setState(() => _isDetailLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: _isDetailLoading
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(child: Text(_desc, style: const TextStyle(fontSize: 16))),
+      appBar: AppBar(title: Text(widget.artwork.title)),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            if (widget.artwork.imageUrl.isNotEmpty)
+              CachedNetworkImage(
+                imageUrl: widget.artwork.imageUrl,
+                placeholder: (context, url) => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())),
+                errorWidget: (c, e, s) => const Icon(Icons.broken_image, size: 100),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(_desc, style: const TextStyle(fontSize: 16)),
+            ),
+          ],
+        ),
       ),
     );
+
   }
 }
