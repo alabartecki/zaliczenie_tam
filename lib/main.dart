@@ -13,11 +13,17 @@ void main() async {
   await Hive.openBox("favorites");
   await Hive.openBox("descriptions_cache");
 
-  runApp(const MaterialApp(home: ListScreen()));
+  runApp(
+      const MaterialApp(
+          debugShowCheckedModeBanner: false,
+          home: ListScreen(),
+      ),
+  );
+
 }
 
 // ==========================================
-// EKRAN 1: LISTA ELEMENTÓW
+// EKRAN 1: LISTA ELEMENTÓW + REFRESH
 // ==========================================
 class ListScreen extends StatefulWidget {
   const ListScreen({super.key});
@@ -44,6 +50,8 @@ class _ListScreenState extends State<ListScreen> {
     });
 
     try {
+      debugPrint("START: Downloading fresh data from the Metropolitan Museum API...");
+
       final List<Artwork> fetchedData = await ArtworkApiService.fetchArtworks();
 
       setState(() {
@@ -51,6 +59,8 @@ class _ListScreenState extends State<ListScreen> {
       });
 
       await ArtworkLocalDatabase.saveArtworksToCache(fetchedData);
+
+      debugPrint("SUCCESS: Data refreshed and saved in Hive!");
 
     } catch (e) {
       if (!ArtworkLocalDatabase.isCacheEmpty()) {
@@ -73,36 +83,45 @@ class _ListScreenState extends State<ListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Metropolitan Museum of Art")),
+      appBar: AppBar(
+        title: const Text("Metropolitan Museum of Art"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: "Odśwież dane",
+            onPressed: _isLoading ? null : _fetch,
+          ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? Center(child: Text(_error!))
           : ListView.builder(
-        itemCount: _artworks.length,
-        itemBuilder: (context, i) {
-          final item = _artworks[i];
+              itemCount: _artworks.length,
+              itemBuilder: (context, i) {
+                final item = _artworks[i];
 
-          return ListTile(
-            leading: SizedBox(
-              width: 50,
-              height: 50,
-              child: item.imageUrl.isNotEmpty
-                  ? CachedNetworkImage(
-                imageUrl: item.imageUrl,
-                fit: BoxFit.cover,
-                placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 2),
-                errorWidget: (context, url, error) => const Icon(Icons.broken_image),
-              )
-                  : const Icon(Icons.image_not_supported),
-            ),
-            title: Text(item.title),
-            subtitle: Text(item.artistDisplay),
-            onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (c) => DetailScreen(artwork: item),
-            )),
-          );
-        },
+                return ListTile(
+                  leading: SizedBox(
+                    width: 50,
+                    height: 50,
+                    child: item.imageUrl.isNotEmpty
+                        ? CachedNetworkImage(
+                            imageUrl: item.imageUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 2),
+                            errorWidget: (context, url, error) => const Icon(Icons.broken_image),
+                          )
+                        : const Icon(Icons.image_not_supported),
+                  ),
+                  title: Text(item.title),
+                  subtitle: Text(item.artistDisplay),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (c) => DetailScreen(artwork: item),
+                  )),
+                );
+              },
       ),
     );
   }
@@ -156,13 +175,44 @@ class _DetailScreenState extends State<DetailScreen> {
       appBar: AppBar(title: Text(widget.artwork.title)),
       body: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (widget.artwork.imageUrl.isNotEmpty)
               CachedNetworkImage(
                 imageUrl: widget.artwork.imageUrl,
-                placeholder: (context, url) => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator())),
+                placeholder: (context, url) => const Center(
+                  child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()),
+                ),
                 errorWidget: (c, e, s) => const Icon(Icons.broken_image, size: 100),
               ),
+
+            Padding(
+              padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.artwork.title,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Artist: ${widget.artwork.artistDisplay}",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Divider(),
+                ],
+              ),
+            ),
+
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Text(_desc, style: const TextStyle(fontSize: 16)),
