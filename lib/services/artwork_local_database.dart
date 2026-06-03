@@ -27,6 +27,33 @@ class ArtworkLocalDatabase {
     return _cacheBox.isEmpty;
   }
 
+  // TRENDING
+
+  /// zwraca listę trending artworków zapisaną w pamięci podręcznej
+  static List<Artwork> getCachedTrending() {
+    final box = Hive.box("trending_cache");
+    return box.values.whereType<Map>().map((item) {
+      return Artwork.fromJson(Map<String, dynamic>.from(item));
+    }).toList();
+  }
+
+  /// czyści stary cache trending i zapisuje nową pobraną listę z API
+  static Future<void> saveTrendingToCache(List<Artwork> artworks) async {
+    final box = Hive.box("trending_cache");
+    await box.clear();
+    for (final art in artworks) {
+      await box.put(art.id, art.toJson());
+    }
+  }
+
+  /// sprawdza, czy cache trending jest pusty (pomija klucz daty)
+  static bool isTrendingCacheEmpty() {
+    return Hive.box("trending_cache")
+        .values
+        .whereType<Map>()
+        .isEmpty;
+  }
+
   /// czyszczenie pamięci podręcznej- z poziomu ekranu ustawień
   static Future<void> clearCache() async {
     await _cacheBox.clear();

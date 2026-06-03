@@ -1,28 +1,70 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/artwork.dart';
+import '../models/artwork_settings.dart';
 
 class ArtworkApiService {
-  static const String _baseUrl = "https://collectionapi.metmuseum.org/public/collection/v1";
+  static const String _baseUrl =
+      "https://collectionapi.metmuseum.org/public/collection/v1";
 
-  static Future<List<Artwork>> fetchArtworks() async {
-    final searchUrl = Uri.parse("$_baseUrl/search?q=painting&hasImages=true&isHighlight=true");
-    final searchResponse = await http.get(searchUrl).timeout(const Duration(seconds: 10));
+  static Future<List<Artwork>> fetchArtworks({
+    ArtworkSettings settings = const ArtworkSettings(),
+  }) async {
+    final ids = await _fetchSearchIds(settings);
+    final artworks = <Artwork>[];
 
-    if (searchResponse.statusCode != 200) {
-      throw Exception("Failed to retrieve the list of artworks (Code: ${searchResponse.statusCode})");
+    for (final id in ids) {
+      final artwork = await _fetchArtwork(id, settings);
+      if (artwork == null) {
+        continue;
+      }
+      artworks.add(artwork);
+      if (artworks.length >= settings.numberOfArtworks) {
+        break;
+      }
     }
 
-    final searchData = jsonDecode(searchResponse.body);
-    final List<int> ids = (searchData["objectIDs"] as List).cast<int>().take(15).toList();
-
-    final futures = ids.map((id) => _fetchArtwork(id));
-    final results = await Future.wait(futures);
-
-    return results.whereType<Artwork>().toList();
+    return artworks;
   }
 
-  static Future<Artwork?> _fetchArtwork(int id) async {
+  static Future<List<int>> _fetchSearchIds(ArtworkSettings settings) async {
+    final departments = settings.departmentIds.isEmpty
+        ? <int?>[null]
+        : settings.departmentIds.map<int?>((id) => id).toList();
+    final ids = <int>[];
+
+    for (final departmentId in departments) {
+      final url = _buildSearchUrl(settings, departmentId);
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          "Failed to retrieve the list of artworks (Code: ${response.statusCode})",
+        );
+      }
+
+      final data = jsonDecode(response.body);
+      final objectIds = (data["objectIDs"] as List? ?? []).cast<int>();
+      ids.addAll(objectIds);
+    }
+
+    return ids.toSet().take(settings.numberOfArtworks * 8).toList();
+  }
+
+  static Uri _buildSearchUrl(ArtworkSettings settings, int? departmentId) {
+    final params = <String, String>{"q": "painting", "hasImages": "true"};
+
+    if (departmentId != null) {
+      params["departmentId"] = departmentId.toString();
+    }
+
+    return Uri.parse("$_baseUrl/search").replace(queryParameters: params);
+  }
+
+  static Future<Artwork?> _fetchArtwork(
+    int id,
+    ArtworkSettings settings,
+  ) async {
     try {
       final url = Uri.parse("$_baseUrl/objects/$id");
       final response = await http.get(url).timeout(const Duration(seconds: 7));
@@ -36,6 +78,13 @@ class ArtworkApiService {
 
       if (imageUrl.isEmpty) return null;
 
+      final additionalImages =
+          (settings.showExtraArtworkInfo || settings.showAdditionalImages)
+          ? (data["additionalImages"] as List? ?? [])
+                .whereType<String>()
+                .toList()
+          : <String>[];
+
       return Artwork(
         id: data["objectID"] as int,
         title: data["title"] as String? ?? "Unknown title",
@@ -43,10 +92,45 @@ class ArtworkApiService {
             ? data["artistDisplayName"] as String
             : "Unknown artist",
         imageUrl: imageUrl,
+        additionalImageUrls: additionalImages,
+        culture: data["culture"] as String? ?? "",
+        artistNationality: data["artistNationality"] as String? ?? "",
+        artistGender: data["artistGender"] as String? ?? "",
+        city: data["city"] as String? ?? "",
+        classification: data["classification"] as String? ?? "",
       );
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<List<Artwork>> fetchTrendingArtworks({int limit = 20}) async {
+    final url = Uri.parse("$_baseUrl/search").replace(queryParameters: {
+      "q": "painting",
+      "hasImages": "true",
+      "isHighlight": "true",
+    });
+
+    final response = await http.get(url).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        "Failed to retrieve trending artworks (Code: ${response.statusCode})",
+      );
+    }
+
+    final data = jsonDecode(response.body);
+    final objectIds = (data["objectIDs"] as List? ?? []).cast<int>();
+    final artworks = <Artwork>[];
+
+    for (final id in objectIds) {
+      final artwork = await _fetchArtwork(id, const ArtworkSettings());
+      if (artwork == null) continue;
+      artworks.add(artwork);
+      if (artworks.length >= limit) break;
+    }
+
+    return artworks;
   }
 
   static Future<String> fetchArtworkDescription(int artworkId) async {
@@ -77,6 +161,8 @@ class ArtworkApiService {
           : "There is no detailed description for this artwork.";
     }
 
-    throw Exception("Could not get the description of the work (Code: ${response.statusCode})");
+    throw Exception(
+      "Could not get the description of the work (Code: ${response.statusCode})",
+    );
   }
 }
