@@ -17,7 +17,17 @@ void main() async {
   await Hive.openBox("trending_cache");
 
   runApp(
-    const MaterialApp(debugShowCheckedModeBanner: false, home: ListScreen()),
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0B95A8),
+          brightness: Brightness.light,
+        ),
+        useMaterial3: true,
+      ),
+      home: const MainScreen(),
+    ),
   );
 }
 
@@ -85,7 +95,132 @@ Future<void> updateFavoriteData(
 }
 
 // ==========================================
-// EKRAN 1: LISTA ELEMENTÓW + REFRESH
+// MAIN: DOLNY NAV WRAPPER
+// ==========================================
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  int _currentIndex = 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Metropolitan Museum of Art"),
+        actions: [
+          if (_currentIndex == 0)
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (c) => const SettingsScreen()),
+              ),
+            ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: const [ListScreen(), TrendingScreen(), FavoritesScreen()],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (i) => setState(() => _currentIndex = i),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.palette),
+            label: 'My Arts',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.trending_up),
+            label: 'Trending',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.favorite),
+            label: 'Favourites',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// SHARED: ARTWORK LIST TILE
+// ==========================================
+class ArtworkTile extends StatelessWidget {
+  final Artwork artwork;
+  final int? rank;
+  final Widget trailing;
+  final VoidCallback onTap;
+
+  const ArtworkTile({
+    super.key,
+    required this.artwork,
+    this.rank,
+    required this.trailing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (rank != null)
+              SizedBox(
+                width: 28,
+                child: Text(
+                  "$rank.",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            if (rank != null) const SizedBox(width: 8),
+            SizedBox(
+              width: 50,
+              height: 50,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: artwork.imageUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: artwork.imageUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) =>
+                            const CircularProgressIndicator(strokeWidth: 2),
+                        errorWidget: (context, url, error) =>
+                            const Icon(Icons.broken_image),
+                      )
+                    : const Icon(Icons.image_not_supported, size: 35),
+              ),
+            ),
+          ],
+        ),
+        title: Text(
+          artwork.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          artwork.artistDisplay,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: trailing,
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+// ==========================================
+// EKRAN 1: LISTA ELEMENTÓW
 // ==========================================
 class ListScreen extends StatefulWidget {
   const ListScreen({super.key});
@@ -178,34 +313,6 @@ class _ListScreenState extends State<ListScreen> {
     final favBox = Hive.box("favorites");
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Metropolitan Museum of Art"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.favorite, color: Colors.red),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (c) => const FavoritesScreen()),
-            ).then((_) => setState(() {})),
-          ),
-          IconButton(
-            icon: const Icon(Icons.trending_up),
-            tooltip: "Museum's Trending",
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (c) => const TrendingScreen()),
-            ).then((_) => setState(() {})),
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (c) => const SettingsScreen()),
-            ),
-          ),
-        ],
-      ),
-
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -232,38 +339,8 @@ class _ListScreenState extends State<ListScreen> {
                 itemBuilder: (context, i) {
                   final item = _artworks[i];
                   final bool isFav = favBox.containsKey(item.id);
-                  return ListTile(
-                    leading: SizedBox(
-                      width: 50,
-                      height: 50,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: item.imageUrl.isNotEmpty
-                            ? CachedNetworkImage(
-                                imageUrl: item.imageUrl,
-                                fit: BoxFit.cover,
-                                placeholder: (context, url) =>
-                                    const CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                errorWidget: (context, url, error) =>
-                                    const Icon(Icons.broken_image),
-                              )
-                            : const Icon(Icons.image_not_supported, size: 35),
-                      ),
-                    ),
-
-                    title: Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      item.artistDisplay,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
+                  return ArtworkTile(
+                    artwork: item,
                     trailing: IconButton(
                       icon: Icon(
                         isFav ? Icons.favorite : Icons.favorite_border,
@@ -271,7 +348,6 @@ class _ListScreenState extends State<ListScreen> {
                       ),
                       onPressed: () => _toggleFav(item),
                     ),
-
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -706,11 +782,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final box = Hive.box("favorites");
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Your Favorites Ranking:")),
       body: _favoriteKeys.isEmpty
           ? const Center(child: Text("No favorite artworks."))
           : ReorderableListView.builder(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(vertical: 4),
               buildDefaultDragHandles: false,
               itemCount: _favoriteKeys.length,
               onReorderItem: (oldIndex, newIndex) =>
@@ -723,75 +798,21 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                 return ReorderableDragStartListener(
                   key: ValueKey(key),
                   index: i,
-                  child: Card(
-                    margin: EdgeInsets.zero,
-                    clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      side: BorderSide(color: Colors.grey.shade300),
+                  child: ArtworkTile(
+                    artwork: item,
+                    rank: i + 1,
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.grey),
+                      onPressed: () => _deleteFavorite(box, key),
                     ),
-                    child: ListTile(
-                      leading: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 28,
-                            child: Text(
-                              "${i + 1}.",
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 50,
-                            height: 50,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
-                              child: item.imageUrl.isNotEmpty
-                                  ? CachedNetworkImage(
-                                      imageUrl: item.imageUrl,
-                                      fit: BoxFit.cover,
-                                      placeholder: (context, url) =>
-                                          const CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                      errorWidget: (context, url, error) =>
-                                          const Icon(Icons.broken_image),
-                                    )
-                                  : const Icon(
-                                      Icons.image_not_supported,
-                                      size: 35,
-                                    ),
-                            ),
-                          ),
-                        ],
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (c) => DetailScreen(artwork: item),
                       ),
-                      title: Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.grey),
-                        onPressed: () => _deleteFavorite(box, key),
-                      ),
-                      onTap: () =>
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (c) => DetailScreen(artwork: item),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {
-                                _loadFavoriteKeys();
-                              });
-                            }
-                          }),
-                    ),
+                    ).then((_) {
+                      if (mounted) setState(() => _loadFavoriteKeys());
+                    }),
                   ),
                 );
               },
@@ -915,10 +936,6 @@ class _TrendingScreenState extends State<TrendingScreen> {
     final favBox = Hive.box("favorites");
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Museum's Top Trending Artworks"),
-      ),
-
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -945,57 +962,9 @@ class _TrendingScreenState extends State<TrendingScreen> {
                 itemBuilder: (context, i) {
                   final item = _artworks[i];
                   final bool isFav = favBox.containsKey(item.id);
-                  return ListTile(
-                    leading: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 28,
-                          child: Text(
-                            "${i + 1}.",
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 50,
-                          height: 50,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: item.imageUrl.isNotEmpty
-                                ? CachedNetworkImage(
-                                    imageUrl: item.imageUrl,
-                                    fit: BoxFit.cover,
-                                    placeholder: (context, url) =>
-                                        const CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                    errorWidget: (context, url, error) =>
-                                        const Icon(Icons.broken_image),
-                                  )
-                                : const Icon(
-                                    Icons.image_not_supported,
-                                    size: 35,
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    title: Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      item.artistDisplay,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
+                  return ArtworkTile(
+                    artwork: item,
+                    rank: i + 1,
                     trailing: IconButton(
                       icon: Icon(
                         isFav ? Icons.favorite : Icons.favorite_border,
@@ -1003,7 +972,6 @@ class _TrendingScreenState extends State<TrendingScreen> {
                       ),
                       onPressed: () => _toggleFav(item),
                     ),
-
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
