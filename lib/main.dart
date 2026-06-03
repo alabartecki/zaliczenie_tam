@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import '../models/artwork.dart';
 import '../models/artwork_settings.dart';
 import '../services/artwork_api_service.dart';
 import '../services/artwork_local_database.dart';
+import 'firebase_options.dart';
+
+final _analytics = FirebaseAnalytics.instance;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
   await Hive.initFlutter();
 
   await Hive.openBox("artworks_cache");
@@ -47,7 +55,12 @@ Future<void> saveArtworkSettings(ArtworkSettings settings) async {
 }
 
 List<dynamic> favoriteKeysInRankOrder(Box box) {
-  final entries = box.keys.toList().asMap().entries.map((entry) {
+  final entries = box.keys
+      .where((key) => box.get(key) != null)
+      .toList()
+      .asMap()
+      .entries
+      .map((entry) {
     final value = Map<String, dynamic>.from(box.get(entry.value));
     final rank = value[favoriteRankKey];
     return (
@@ -128,7 +141,14 @@ class _MainScreenState extends State<MainScreen> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) {
+          setState(() => _currentIndex = i);
+          const names = ['my_arts', 'trending', 'favourites'];
+          _analytics.logEvent(
+            name: 'tab_switched',
+            parameters: {'tab': names[i]},
+          );
+        },
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.palette),
@@ -156,6 +176,8 @@ class ArtworkTile extends StatelessWidget {
   final int? rank;
   final Widget trailing;
   final VoidCallback onTap;
+  final EdgeInsetsGeometry margin;
+  final int? dragIndex;
 
   const ArtworkTile({
     super.key,
@@ -163,13 +185,13 @@ class ArtworkTile extends StatelessWidget {
     this.rank,
     required this.trailing,
     required this.onTap,
+    this.margin = const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    this.dragIndex,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: ListTile(
+    final tile = ListTile(
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -214,7 +236,12 @@ class ArtworkTile extends StatelessWidget {
         ),
         trailing: trailing,
         onTap: onTap,
-      ),
+    );
+    return Card(
+      margin: margin,
+      child: dragIndex != null
+          ? ReorderableDragStartListener(index: dragIndex!, child: tile)
+          : tile,
     );
   }
 }
@@ -283,7 +310,6 @@ class _ListScreenState extends State<ListScreen> {
     }
   }
 
-  // funkcja pomocnicza do przełączania ulubionych
   void _toggleFav(Artwork art) async {
     final box = Hive.box("favorites");
     final descBox = Hive.box("descriptions_cache");
@@ -293,7 +319,10 @@ class _ListScreenState extends State<ListScreen> {
     } else {
       final favoriteData = art.toJson();
       await addFavoriteAtEnd(box, art.id, favoriteData);
-
+      _analytics.logEvent(
+        name: 'artwork_favourited',
+        parameters: {'artwork_id': art.id, 'artwork_title': art.title},
+      );
       try {
         final String description =
             descBox.get(art.id) ??
@@ -414,6 +443,13 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _selectedImageUrl = widget.artwork.imageUrl;
     _fetchDetail();
+    _analytics.logEvent(
+      name: 'artwork_opened',
+      parameters: {
+        'artwork_id': widget.artwork.id,
+        'artwork_title': widget.artwork.title,
+      },
+    );
   }
 
   Future<void> _fetchDetail() async {
@@ -744,11 +780,24 @@ class FavoritesScreen extends StatefulWidget {
 
 class _FavoritesScreenState extends State<FavoritesScreen> {
   List<dynamic> _favoriteKeys = [];
+  bool _isReordering = false;
+
+  late final VoidCallback _boxListener;
 
   @override
   void initState() {
     super.initState();
     _loadFavoriteKeys();
+    _boxListener = () {
+      if (mounted && !_isReordering) setState(() => _loadFavoriteKeys());
+    };
+    Hive.box("favorites").listenable().addListener(_boxListener);
+  }
+
+  @override
+  void dispose() {
+    Hive.box("favorites").listenable().removeListener(_boxListener);
+    super.dispose();
   }
 
   void _loadFavoriteKeys() {
@@ -765,6 +814,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   }
 
   Future<void> _reorderFavorites(Box box, int oldIndex, int newIndex) async {
+    _isReordering = true;
     setState(() {
       final movedKey = _favoriteKeys.removeAt(oldIndex);
       _favoriteKeys.insert(newIndex, movedKey);
@@ -775,6 +825,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         favoriteRankKey: i,
       });
     }
+    _isReordering = false;
   }
 
   @override
@@ -787,33 +838,39 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
           : ReorderableListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 4),
               buildDefaultDragHandles: false,
+              proxyDecorator: (child, index, animation) => Material(
+                color: Colors.transparent,
+                elevation: 6,
+                shadowColor: Colors.black38,
+                child: child,
+              ),
               itemCount: _favoriteKeys.length,
               onReorderItem: (oldIndex, newIndex) =>
                   _reorderFavorites(box, oldIndex, newIndex),
               itemBuilder: (context, i) {
                 final key = _favoriteKeys[i];
+                final raw = box.get(key);
+                if (raw == null) return SizedBox.shrink(key: ValueKey(key));
                 final item = Artwork.fromJson(
-                  Map<String, dynamic>.from(box.get(key)),
+                  Map<String, dynamic>.from(raw),
                 );
-                return ReorderableDragStartListener(
+                return ArtworkTile(
                   key: ValueKey(key),
-                  index: i,
-                  child: ArtworkTile(
-                    artwork: item,
-                    rank: i + 1,
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.grey),
-                      onPressed: () => _deleteFavorite(box, key),
-                    ),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (c) => DetailScreen(artwork: item),
-                      ),
-                    ).then((_) {
-                      if (mounted) setState(() => _loadFavoriteKeys());
-                    }),
+                  artwork: item,
+                  rank: i + 1,
+                  dragIndex: i,
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.grey),
+                    onPressed: () => _deleteFavorite(box, key),
                   ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (c) => DetailScreen(artwork: item),
+                    ),
+                  ).then((_) {
+                    if (mounted) setState(() => _loadFavoriteKeys());
+                  }),
                 );
               },
             ),
@@ -916,7 +973,10 @@ class _TrendingScreenState extends State<TrendingScreen> {
     } else {
       final favoriteData = art.toJson();
       await addFavoriteAtEnd(box, art.id, favoriteData);
-
+      _analytics.logEvent(
+        name: 'artwork_favourited',
+        parameters: {'artwork_id': art.id, 'artwork_title': art.title},
+      );
       try {
         final String description =
             descBox.get(art.id) ??

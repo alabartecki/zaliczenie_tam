@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "371184605621",
+    "project_id": "tai-zaliczenie-cad49",
+    "storage_bucket": "tai-zaliczenie-cad49.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:371184605621:android:726221fe9b883f32c5a1fc",
+        "android_client_info": {
+          "package_name": "com.example.zaliczenie_tam"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBynT1Plpa3TgyCCCdS5BVjpg8fI6Hgy0s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
